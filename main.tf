@@ -84,7 +84,7 @@ resource "aws_iam_role" "ecs_task_role" {
 resource "aws_ecs_task_definition" "microservice" {
   for_each = {
     rss_feed_crawler = { image = "roboworksolutions/rss-feed-crawler-microservice:latest", container_port = 5001, host_port = 5001 },
-    rss_sentiment_classifier = { image = "roboworksolutions/rss-sentiment-classifier-microservice:latest", container_port = 5014, host_port = 5014 },
+    rss_sentiment_classifier = { image = "roboworksolutions/rss-sentiment-classifier-microservice:latest", container_port = 5003, host_port = 5003 },
     rss_classifier = { image = "roboworksolutions/rss-classifier-microservice:latest", container_port = 5000, host_port = 5000 },
     rss_reader = { image = "roboworksolutions/rss-reader-microservice:latest", container_port = 5002, host_port = 5002 }
   }
