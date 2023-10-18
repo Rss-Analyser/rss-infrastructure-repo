@@ -1,0 +1,1 @@
+cockroach sql --insecure --host=localhost -d rss_db -f cockroachDB_setup.sql
