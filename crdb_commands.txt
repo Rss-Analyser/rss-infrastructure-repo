@@ -1,1 +1,3 @@
 cockroach sql --insecure --host=localhost -d rss_db -f cockroachDB_setup.sql
+
+cockroach start --insecure --store=node2 --listen-addr=localhost:26258 --http-addr=localhost:8081 --join=localhost:26257
