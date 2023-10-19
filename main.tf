@@ -108,7 +108,9 @@ resource "aws_security_group" "efs_sg" {
 
 resource "aws_security_group" "ec2_ssh_sg" {
   name        = "ec2_ssh_sg"
+  vpc_id      = aws_vpc.rss_vpc.id 
   description = "Allow inbound SSH traffic"
+  
 
   # Inbound rule to allow SSH (port 22) from a specific IP or CIDR range
   ingress {
@@ -177,9 +179,9 @@ resource "aws_ecs_service" "microservice" {
   desired_count   = 1
 
   network_configuration {
-    subnets = data.aws_subnets.available.ids
-    security_groups = [aws_security_group.efs_sg.id]
-  }
+      subnets         = [aws_subnet.rss_subnet.id]
+      security_groups = [aws_security_group.cockroachdb_sg.id]
+   }
 }
 
 # Variables
@@ -192,6 +194,7 @@ variable "create_efs" {
 # Security Group for CockroachDB
 resource "aws_security_group" "cockroachdb_sg" {
   name        = "cockroachdb_sg"
+  vpc_id = aws_vpc.rss_vpc.id
   description = "Allow CockroachDB-specific traffic"
 
   # Allow CockroachDB inter-node and client traffic
@@ -216,6 +219,7 @@ resource "aws_security_group" "cockroachdb_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  
 }
 
 # CockroachDB Configuration for ECS Fargate
@@ -262,8 +266,9 @@ resource "aws_ecs_service" "cockroachdb" {
   launch_type     = "FARGATE"
   desired_count   = 5
 
+
   network_configuration {
-    subnets = data.aws_subnets.available.ids
+    subnets = [aws_subnet.rss_subnet.id]
     security_groups = [aws_security_group.cockroachdb_sg.id]
   }
 }
@@ -333,34 +338,35 @@ resource "aws_instance" "rss_data_fetcher" {
   instance_type = "t2.micro"
   key_name      = "my_ec2_key" # Replace with your SSH key name
 
+  subnet_id = aws_subnet.rss_subnet.id
+  vpc_security_group_ids = [aws_security_group.ec2_ssh_sg.id]
+  
   iam_instance_profile = aws_iam_instance_profile.ec2_ecs_instance_profile.name
 
-  vpc_security_group_ids = [aws_security_group.ec2_ssh_sg.id]
+  user_data = <<-EOF
+          #!/bin/bash
+          yum update -y
+          yum install -y python3 python3-pip git wget
 
-user_data = <<-EOF
-        #!/bin/bash
-        yum update -y
-        yum install -y python3 python3-pip git wget
+          # Install CockroachDB client
+          wget -qO- https://binaries.cockroachdb.com/cockroach-v21.1.9.linux-amd64.tgz | tar xvz
+          sudo cp -i cockroach-v21.1.9.linux-amd64/cockroach /usr/local/bin/
 
-        # Install CockroachDB client
-        wget -qO- https://binaries.cockroachdb.com/cockroach-v21.1.9.linux-amd64.tgz | tar xvz
-        sudo cp -i cockroach-v21.1.9.linux-amd64/cockroach /usr/local/bin/
+          # Clone the frontend repo
+          git clone https://github.com/Rss-Analyser/rss-frontend-repo.git /home/ec2-user/rss-frontend-repo
 
-        # Clone the frontend repo
-        git clone https://github.com/Rss-Analyser/rss-frontend-repo.git /home/ec2-user/rss-frontend-repo
+          # Clone the infrastructure repo
+          git clone https://github.com/Rss-Analyser/rss-infrastructure-repo.git /home/ec2-user/rss-infrastructure-repo
 
-        # Clone the infrastructure repo
-        git clone https://github.com/Rss-Analyser/rss-infrastructure-repo.git /home/ec2-user/rss-infrastructure-repo
+          # Here, run the database setup script from the infrastructure repo.
+          # Assuming the script is executable and contains the necessary logic 
+          # to check if the database is set up, and if not, runs the setup.
+          # Also assuming the script is located at the root of the repo.
+          /home/ec2-user/rss-infrastructure-repo/setup_db_script.sh
 
-        # Here, run the database setup script from the infrastructure repo.
-        # Assuming the script is executable and contains the necessary logic 
-        # to check if the database is set up, and if not, runs the setup.
-        # Also assuming the script is located at the root of the repo.
-        /home/ec2-user/rss-infrastructure-repo/setup_db_script.sh
-
-        # Set up a cron job to run the rss_data_fetch_pipe.py script every hour
-        (crontab -l 2>/dev/null; echo "0 * * * * /usr/bin/python3 /home/ec2-user/rss-frontend-repo/rss_data_fetch_pipe.py >> /home/ec2-user/rss_data_fetch_pipe.log 2>&1") | crontab -
-        EOF
+          # Set up a cron job to run the rss_data_fetch_pipe.py script every hour
+          (crontab -l 2>/dev/null; echo "0 * * * * /usr/bin/python3 /home/ec2-user/rss-frontend-repo/rss_data_fetch_pipe.py >> /home/ec2-user/rss_data_fetch_pipe.log 2>&1") | crontab -
+          EOF
 
   tags = {
     Name = "rss_data_fetcher"
