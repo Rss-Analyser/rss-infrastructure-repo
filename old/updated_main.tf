@@ -30,26 +30,6 @@ resource "aws_iam_role" "ecs_task_role" {
   })
 }
 
-resource "aws_vpc" "rss_vpc" {
-  cidr_block       = "10.0.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
-
-  tags = {
-    Name = "RssVPC"
-  }
-}
-
-resource "aws_subnet" "rss_subnet" {
-  vpc_id                  = aws_vpc.rss_vpc.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "us-west-2a"   # Replace with your desired AZ
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "RssSubnet"
-  }
-}
 
 
 #   tags = {
@@ -276,8 +256,9 @@ resource "aws_efs_file_system" "cockroachdb_data" {
 }
 
 resource "aws_efs_mount_target" "cockroachdb_data_mount" {
+  count           = length(data.aws_availability_zones.available.names)
   file_system_id  = aws_efs_file_system.cockroachdb_data.id
-  subnet_id       = aws_subnet.rss_subnet.id
+  subnet_id       = tolist(data.aws_subnets.available.ids)[count.index]
   security_groups = [aws_security_group.cockroachdb_sg.id]
 }
 
@@ -367,3 +348,78 @@ user_data = <<-EOF
   }
 }
 
+
+# ALB Security Group
+resource "aws_security_group" "alb_sg" {
+  name        = "alb_sg"
+  description = "Allow inbound traffic to ALB"
+
+  # Allow inbound traffic on port 26257 (CockroachDB default)
+  ingress {
+    from_port   = 26257
+    to_port     = 26257
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # Adjust this based on your needs
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Application Load Balancer
+resource "aws_lb" "cockroachdb_alb" {
+  name               = "cockroachdb-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = ["subnet-placeholder-1", "subnet-placeholder-2"] # Replace with your actual Subnet IDs
+
+  enable_deletion_protection = false
+  enable_cross_zone_load_balancing   = true
+}
+
+# Target Group for CockroachDB
+resource "aws_lb_target_group" "cockroachdb_tg" {
+  name     = "cockroachdb-tg"
+  port     = 26257
+  protocol = "TCP"
+  vpc_id   = "vpc-placeholder" # Replace with your actual VPC ID
+
+  health_check {
+    interval            = 30
+    port                = "26257"
+    timeout             = 10
+    protocol            = "TCP"
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+  }
+}
+
+# ALB Listener
+resource "aws_lb_listener" "cockroachdb_listener" {
+  load_balancer_arn = aws_lb.cockroachdb_alb.arn
+  port              = 26257
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.cockroachdb_tg.arn
+  }
+}
+
+# Update ECS Service to associate with the ALB
+resource "aws_ecs_service" "cockroachdb" {
+  # ... (existing configurations)
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.cockroachdb_tg.arn
+    container_name   = "cockroachdb-container-name" # Replace with your container name in the task definition
+    container_port   = 26257
+  }
+
+  # ... (rest of the configurations)
+}
